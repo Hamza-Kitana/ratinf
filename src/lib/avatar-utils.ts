@@ -1,5 +1,6 @@
 export function hasCharacterImage(image: string | undefined): boolean {
-  return Boolean(image?.trim());
+  if (!image?.trim()) return false;
+  return true;
 }
 
 export function getInitials(name: string): string {

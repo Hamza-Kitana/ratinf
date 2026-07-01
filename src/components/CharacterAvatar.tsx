@@ -1,5 +1,6 @@
-import { useState, type CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { cn } from "@/lib/utils";
+import { useResolvedImage } from "@/hooks/use-resolved-image";
 import {
   getAvatarStyle,
   getDisplayName,
@@ -39,8 +40,13 @@ export function CharacterAvatar({
   style,
 }: CharacterAvatarProps) {
   const [imgFailed, setImgFailed] = useState(false);
+  const resolvedSrc = useResolvedImage(image);
   const s = SIZE_MAP[size];
-  const hasImage = hasCharacterImage(image) && !imgFailed;
+  const hasImage = hasCharacterImage(image) && Boolean(resolvedSrc) && !imgFailed;
+
+  useEffect(() => {
+    setImgFailed(false);
+  }, [image, resolvedSrc]);
   const { hue, hue2 } = getAvatarStyle(name);
   const initials = getInitials(name);
   const stackedName = getDisplayName(name);
@@ -55,9 +61,11 @@ export function CharacterAvatar({
           />
         )}
         <img
-          src={image}
+          src={resolvedSrc}
           alt={name}
           onError={() => setImgFailed(true)}
+          loading="lazy"
+          decoding="async"
           className={cn(
             "relative object-cover",
             s.box,

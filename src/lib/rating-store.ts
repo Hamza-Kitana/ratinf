@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { clearAllImages, deleteImageRef } from "@/lib/image-store";
 
 export const CRITERIA = [
   { key: "presence", label: "نسبة التواجد في السيرفر", icon: "📡" },
@@ -162,10 +163,15 @@ export function useCharacters() {
   }, []);
 
   const remove = useCallback((id: string) => {
+    const target = read().find((c) => c.id === id);
+    if (target?.image) void deleteImageRef(target.image);
     write(read().filter((c) => c.id !== id));
   }, []);
 
-  const clearAll = useCallback(() => write([]), []);
+  const clearAll = useCallback(() => {
+    write([]);
+    void clearAllImages();
+  }, []);
 
   return { list, addCharacter, updateScores, remove, clearAll };
 }

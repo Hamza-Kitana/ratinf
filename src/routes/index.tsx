@@ -16,6 +16,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { CRITERIA, averageScore, buildPodiumGroups, effectiveCriterionScore, isInverseCriterion, useCharacters, type Character, type CriterionKey, type ScoredCharacter } from "@/lib/rating-store";
+import { isImageFile, isImageStoreRef, saveImageFile } from "@/lib/image-store";
 import { INFINITY_LOGO_URL } from "@/assets/logo";
 
 export const Route = createFileRoute("/")({
@@ -360,11 +361,29 @@ const CharacterCard = memo(function CharacterCard({ character, index, onRate, on
 function AddView({ onCancel, onCreate }: { onCancel: () => void; onCreate: (name: string, image: string) => void }) {
   const [name, setName] = useState("");
   const [image, setImage] = useState("");
+  const [imageLoading, setImageLoading] = useState(false);
+  const [imageError, setImageError] = useState("");
 
-  const handleFile = (file: File) => {
-    const reader = new FileReader();
-    reader.onload = () => setImage(reader.result as string);
-    reader.readAsDataURL(file);
+  const handleFile = async (file: File) => {
+    setImageError("");
+    if (!isImageFile(file)) {
+      setImageError("الملف لازم يكون صورة (JPG, PNG, GIF, WEBP, HEIC...)");
+      return;
+    }
+    setImageLoading(true);
+    try {
+      const ref = await saveImageFile(file);
+      setImage(ref);
+    } catch {
+      setImageError("ما قدرنا نحفظ الصورة — جرّب مرة ثانية");
+    } finally {
+      setImageLoading(false);
+    }
+  };
+
+  const handleUrlChange = (url: string) => {
+    setImageError("");
+    setImage(url.trim());
   };
 
   return (
@@ -406,17 +425,27 @@ function AddView({ onCancel, onCreate }: { onCancel: () => void; onCreate: (name
                 <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-bold text-muted-foreground">اختياري</span>
               </label>
               <div className="space-y-2">
-                <label className="block cursor-pointer rounded-xl border border-dashed border-primary/40 bg-primary/5 px-4 py-3.5 text-center text-xs font-bold text-primary transition hover:border-primary/70 hover:bg-primary/10">
-                  📁 اختر صورة من جهازك
-                  <input type="file" accept="image/*" className="hidden"
-                    onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])} />
+                <label className={`block cursor-pointer rounded-xl border border-dashed border-primary/40 bg-primary/5 px-4 py-3.5 text-center text-xs font-bold text-primary transition hover:border-primary/70 hover:bg-primary/10 ${imageLoading ? "pointer-events-none opacity-60" : ""}`}>
+                  {imageLoading ? "جاري رفع الصورة..." : "📁 اختر أي صورة — أي حجم"}
+                  <input
+                    type="file"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) void handleFile(file);
+                      e.target.value = "";
+                    }}
+                  />
                 </label>
                 <input
-                  value={image.startsWith("data:") ? "" : image}
-                  onChange={(e) => setImage(e.target.value)}
-                  placeholder="أو الصق رابط صورة"
+                  value={isImageStoreRef(image) || image.startsWith("data:") ? "" : image}
+                  onChange={(e) => handleUrlChange(e.target.value)}
+                  placeholder="أو الصق رابط صورة من الإنترنت"
                   className="input-premium w-full rounded-xl px-3 py-2.5 text-xs"
                 />
+                {imageError && (
+                  <p className="text-xs font-bold text-destructive">{imageError}</p>
+                )}
                 {image && (
                   <button type="button" onClick={() => setImage("")}
                     className="text-xs font-bold text-muted-foreground transition hover:text-destructive">
