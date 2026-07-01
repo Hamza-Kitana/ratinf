@@ -157,6 +157,22 @@ export function useCharacters() {
     return next.id;
   }, []);
 
+  const updateCharacter = useCallback((id: string, patch: { name: string; image: string }) => {
+    const all = read();
+    const current = all.find((c) => c.id === id);
+    if (!current) return;
+
+    if (current.image && current.image !== patch.image) {
+      void deleteImageRef(current.image);
+    }
+
+    write(
+      all.map((c) =>
+        c.id === id ? { ...c, name: patch.name.trim(), image: patch.image } : c,
+      ),
+    );
+  }, []);
+
   const updateScores = useCallback((id: string, scores: Record<CriterionKey, number>) => {
     const all = read().map((c) => (c.id === id ? { ...c, scores } : c));
     write(all);
@@ -173,5 +189,5 @@ export function useCharacters() {
     void clearAllImages();
   }, []);
 
-  return { list, addCharacter, updateScores, remove, clearAll };
+  return { list, addCharacter, updateCharacter, updateScores, remove, clearAll };
 }

@@ -1,4 +1,4 @@
-import { memo, useMemo, useState, useEffect } from "react";
+import { memo, useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { createFileRoute } from "@tanstack/react-router";
 import { BrandHeader } from "@/components/BrandHeader";
@@ -23,56 +23,93 @@ export const Route = createFileRoute("/")({
   component: Home,
 });
 
-type Tab = "roster" | "add" | "rate" | "reveal" | "podium";
+type Tab = "roster" | "add" | "edit" | "rate" | "reveal" | "podium";
 
 function Home() {
-  const { list, addCharacter, updateScores, remove, clearAll } = useCharacters();
-  const [tab, setTab] = useState<Tab>("roster");
+  const { list, addCharacter, updateCharacter, updateScores, remove, clearAll } = useCharacters();
+  const [tab, setTabState] = useState<Tab>("roster");
   const [rateId, setRateId] = useState<string | null>(null);
+  const [editId, setEditId] = useState<string | null>(null);
+  const rosterScrollY = useRef(0);
+
+  const goToTab = useCallback((next: Tab) => {
+    setTabState((current) => {
+      if (current === "roster" && next !== "roster") {
+        rosterScrollY.current = window.scrollY;
+      }
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (tab === "roster") {
+      const y = rosterScrollY.current;
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          window.scrollTo(0, y);
+        });
+      });
+      return;
+    }
+    window.scrollTo(0, 0);
+  }, [tab]);
 
   const rating = list.find((c) => c.id === rateId) ?? null;
+  const editing = list.find((c) => c.id === editId) ?? null;
 
   return (
     <div className="min-h-screen">
       <BackgroundFX />
       <BrandHeader />
       <main className="relative z-10 pb-24">
-        {tab === "roster" && (
+        <div className={tab === "roster" ? undefined : "hidden"} aria-hidden={tab !== "roster"}>
           <RosterView
             list={list}
-            onAdd={() => setTab("add")}
-            onRate={(id) => { setRateId(id); setTab("rate"); }}
-            onReveal={() => setTab("reveal")}
+            onAdd={() => goToTab("add")}
+            onRate={(id) => { setRateId(id); goToTab("rate"); }}
+            onEdit={(id) => { setEditId(id); goToTab("edit"); }}
+            onReveal={() => goToTab("reveal")}
             onRemove={remove}
             onClear={clearAll}
           />
-        )}
-        <div className="mx-auto max-w-6xl px-4 md:px-8">
+        </div>
+        <div className={`mx-auto max-w-6xl px-4 md:px-8 ${tab === "roster" ? "hidden" : ""}`} aria-hidden={tab === "roster"}>
         {tab === "add" && (
           <AddView
-            onCancel={() => setTab("roster")}
+            onCancel={() => goToTab("roster")}
             onCreate={(name, image) => {
               const id = addCharacter(name, image);
               setRateId(id);
-              setTab("rate");
+              goToTab("rate");
+            }}
+          />
+        )}
+        {tab === "edit" && editing && (
+          <EditView
+            character={editing}
+            onCancel={() => { setEditId(null); goToTab("roster"); }}
+            onSave={(name, image) => {
+              updateCharacter(editing.id, { name, image });
+              setEditId(null);
+              goToTab("roster");
             }}
           />
         )}
         {tab === "rate" && rating && (
           <RateView
             character={rating}
-            onSave={(scores) => { updateScores(rating.id, scores); setTab("roster"); }}
-            onBack={() => setTab("roster")}
+            onSave={(scores) => { updateScores(rating.id, scores); goToTab("roster"); }}
+            onBack={() => goToTab("roster")}
           />
         )}
         {tab === "reveal" && (
           <RevealView
             list={list}
-            onComplete={() => setTab("podium")}
-            onBack={() => setTab("roster")}
+            onComplete={() => goToTab("podium")}
+            onBack={() => goToTab("roster")}
           />
         )}
-        {tab === "podium" && <PodiumView list={list} onBack={() => setTab("roster")} />}
+        {tab === "podium" && <PodiumView list={list} onBack={() => goToTab("roster")} />}
         </div>
       </main>
     </div>
@@ -128,11 +165,12 @@ function BackgroundFX() {
 
 /* ---------- Roster ---------- */
 function RosterView({
-  list, onAdd, onRate, onReveal, onRemove, onClear,
+  list, onAdd, onRate, onEdit, onReveal, onRemove, onClear,
 }: {
   list: Character[];
   onAdd: () => void;
   onRate: (id: string) => void;
+  onEdit: (id: string) => void;
   onReveal: () => void;
   onRemove: (id: string) => void;
   onClear: () => void;
@@ -185,6 +223,7 @@ function RosterView({
             {list.map((c, i) => (
               <CharacterCard key={c.id} character={c} index={i}
                 onRate={() => onRate(c.id)}
+                onEdit={() => onEdit(c.id)}
                 onRemove={() => onRemove(c.id)} />
             ))}
           </AnimatePresence>
@@ -309,9 +348,9 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
   );
 }
 
-const CharacterCard = memo(function CharacterCard({ character, index, onRate, onRemove }: {
+const CharacterCard = memo(function CharacterCard({ character, index, onRate, onEdit, onRemove }: {
   character: Character; index: number;
-  onRate: () => void; onRemove: () => void;
+  onRate: () => void; onEdit: () => void; onRemove: () => void;
 }) {
   return (
     <Tilt3D className="h-full" innerClassName="h-full" intensity={10}>
@@ -342,25 +381,31 @@ const CharacterCard = memo(function CharacterCard({ character, index, onRate, on
           </div>
         ))}
       </div>
-      <div className="mt-4 flex gap-2">
+      <div className="mt-4 flex flex-col gap-2">
         <button onClick={onRate}
-          className="btn-primary flex-1 rounded-xl py-2 text-xs font-black">
+          className="btn-primary w-full rounded-xl py-2 text-xs font-black">
           تعديل التقييم
         </button>
-        <button onClick={onRemove}
-          className="rounded-xl border border-border/80 bg-background/30 px-3 text-xs font-bold text-muted-foreground transition hover:border-destructive hover:bg-destructive/10 hover:text-destructive">
-          حذف
-        </button>
+        <div className="flex gap-2">
+          <button onClick={onEdit}
+            className="flex-1 rounded-xl border border-border/80 bg-background/30 py-2 text-xs font-bold text-muted-foreground transition hover:border-primary/50 hover:text-foreground">
+            تعديل الاسم والصورة
+          </button>
+          <button onClick={onRemove}
+            className="rounded-xl border border-border/80 bg-background/30 px-3 text-xs font-bold text-muted-foreground transition hover:border-destructive hover:bg-destructive/10 hover:text-destructive">
+            حذف
+          </button>
+        </div>
       </div>
     </motion.article>
     </Tilt3D>
   );
 });
 
-/* ---------- Add ---------- */
-function AddView({ onCancel, onCreate }: { onCancel: () => void; onCreate: (name: string, image: string) => void }) {
-  const [name, setName] = useState("");
-  const [image, setImage] = useState("");
+/* ---------- Character profile form ---------- */
+function useCharacterProfileForm(initialName = "", initialImage = "") {
+  const [name, setName] = useState(initialName);
+  const [image, setImage] = useState(initialImage);
   const [imageLoading, setImageLoading] = useState(false);
   const [imageError, setImageError] = useState("");
 
@@ -386,6 +431,95 @@ function AddView({ onCancel, onCreate }: { onCancel: () => void; onCreate: (name
     setImage(url.trim());
   };
 
+  const clearImage = () => setImage("");
+
+  return {
+    name,
+    setName,
+    image,
+    imageLoading,
+    imageError,
+    handleFile,
+    handleUrlChange,
+    clearImage,
+  };
+}
+
+function CharacterProfileForm({
+  name,
+  setName,
+  image,
+  imageLoading,
+  imageError,
+  handleFile,
+  handleUrlChange,
+  clearImage,
+}: ReturnType<typeof useCharacterProfileForm>) {
+  return (
+    <div className="mt-8 flex flex-col items-center gap-6 sm:flex-row sm:items-start">
+      <div className="flex flex-col items-center gap-3">
+        <CharacterAvatarPreview name={name} image={image} />
+        <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">معاينة مباشرة</span>
+      </div>
+
+      <div className="w-full flex-1 space-y-5">
+        <div>
+          <label className="mb-2 block text-sm font-bold">اسم الشخصية</label>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="مثلاً: جيمس مورفي"
+            className="input-premium w-full rounded-2xl px-4 py-3.5 text-sm"
+          />
+          <p className="mt-2 text-xs text-muted-foreground">
+            مثال: <span className="font-bold text-primary/90">جيمس مورفي</span> · <span className="font-bold text-primary/90">أحمد الراشد</span>
+          </p>
+        </div>
+
+        <div>
+          <label className="mb-2 flex items-center gap-2 text-sm font-bold">
+            صورة الشخصية
+            <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-bold text-muted-foreground">اختياري</span>
+          </label>
+          <div className="space-y-2">
+            <label className={`block cursor-pointer rounded-xl border border-dashed border-primary/40 bg-primary/5 px-4 py-3.5 text-center text-xs font-bold text-primary transition hover:border-primary/70 hover:bg-primary/10 ${imageLoading ? "pointer-events-none opacity-60" : ""}`}>
+              {imageLoading ? "جاري رفع الصورة..." : "📁 اختر أي صورة — أي حجم"}
+              <input
+                type="file"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void handleFile(file);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+            <input
+              value={isImageStoreRef(image) || image.startsWith("data:") ? "" : image}
+              onChange={(e) => handleUrlChange(e.target.value)}
+              placeholder="أو الصق رابط صورة من الإنترنت"
+              className="input-premium w-full rounded-xl px-3 py-2.5 text-xs"
+            />
+            {imageError && (
+              <p className="text-xs font-bold text-destructive">{imageError}</p>
+            )}
+            {image && (
+              <button type="button" onClick={clearImage}
+                className="text-xs font-bold text-muted-foreground transition hover:text-destructive">
+                إزالة الصورة — استخدم الاسم فقط
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Add ---------- */
+function AddView({ onCancel, onCreate }: { onCancel: () => void; onCreate: (name: string, image: string) => void }) {
+  const form = useCharacterProfileForm();
+
   return (
     <motion.section initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="pt-6">
       <div className="mx-auto max-w-2xl card-premium rounded-3xl p-8 shadow-elevated">
@@ -399,63 +533,7 @@ function AddView({ onCancel, onCreate }: { onCancel: () => void; onCreate: (name
           <div className="hidden text-4xl sm:block">✦</div>
         </div>
 
-        <div className="mt-8 flex flex-col items-center gap-6 sm:flex-row sm:items-start">
-          <div className="flex flex-col items-center gap-3">
-            <CharacterAvatarPreview name={name} image={image} />
-            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">معاينة مباشرة</span>
-          </div>
-
-          <div className="w-full flex-1 space-y-5">
-            <div>
-              <label className="mb-2 block text-sm font-bold">اسم الشخصية</label>
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="مثلاً: جيمس مورفي"
-                className="input-premium w-full rounded-2xl px-4 py-3.5 text-sm"
-              />
-              <p className="mt-2 text-xs text-muted-foreground">
-                مثال: <span className="font-bold text-primary/90">جيمس مورفي</span> · <span className="font-bold text-primary/90">أحمد الراشد</span>
-              </p>
-            </div>
-
-            <div>
-              <label className="mb-2 flex items-center gap-2 text-sm font-bold">
-                صورة الشخصية
-                <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-bold text-muted-foreground">اختياري</span>
-              </label>
-              <div className="space-y-2">
-                <label className={`block cursor-pointer rounded-xl border border-dashed border-primary/40 bg-primary/5 px-4 py-3.5 text-center text-xs font-bold text-primary transition hover:border-primary/70 hover:bg-primary/10 ${imageLoading ? "pointer-events-none opacity-60" : ""}`}>
-                  {imageLoading ? "جاري رفع الصورة..." : "📁 اختر أي صورة — أي حجم"}
-                  <input
-                    type="file"
-                    className="hidden"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) void handleFile(file);
-                      e.target.value = "";
-                    }}
-                  />
-                </label>
-                <input
-                  value={isImageStoreRef(image) || image.startsWith("data:") ? "" : image}
-                  onChange={(e) => handleUrlChange(e.target.value)}
-                  placeholder="أو الصق رابط صورة من الإنترنت"
-                  className="input-premium w-full rounded-xl px-3 py-2.5 text-xs"
-                />
-                {imageError && (
-                  <p className="text-xs font-bold text-destructive">{imageError}</p>
-                )}
-                {image && (
-                  <button type="button" onClick={() => setImage("")}
-                    className="text-xs font-bold text-muted-foreground transition hover:text-destructive">
-                    إزالة الصورة — استخدم الاسم فقط
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
+        <CharacterProfileForm {...form} />
 
         <div className="mt-8 flex justify-end gap-3 border-t border-border/40 pt-6">
           <button onClick={onCancel}
@@ -463,10 +541,54 @@ function AddView({ onCancel, onCreate }: { onCancel: () => void; onCreate: (name
             إلغاء
           </button>
           <button
-            disabled={!name.trim()}
-            onClick={() => onCreate(name.trim(), image)}
+            disabled={!form.name.trim()}
+            onClick={() => onCreate(form.name.trim(), form.image)}
             className="btn-primary rounded-xl px-6 py-2.5 text-sm font-black disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:scale-100">
             التالي: التقييم →
+          </button>
+        </div>
+      </div>
+    </motion.section>
+  );
+}
+
+/* ---------- Edit ---------- */
+function EditView({
+  character,
+  onCancel,
+  onSave,
+}: {
+  character: Character;
+  onCancel: () => void;
+  onSave: (name: string, image: string) => void;
+}) {
+  const form = useCharacterProfileForm(character.name, character.image);
+
+  return (
+    <motion.section initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="pt-6">
+      <div className="mx-auto max-w-2xl card-premium rounded-3xl p-8 shadow-elevated">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-black text-gradient-royal">تعديل الشخصية</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              غيّر الاسم أو الصورة — التقييمات تبقى كما هي.
+            </p>
+          </div>
+          <div className="hidden text-4xl sm:block">✏️</div>
+        </div>
+
+        <CharacterProfileForm {...form} />
+
+        <div className="mt-8 flex justify-end gap-3 border-t border-border/40 pt-6">
+          <button onClick={onCancel}
+            className="rounded-xl border border-border/80 bg-background/30 px-5 py-2.5 text-sm font-bold text-muted-foreground transition hover:text-foreground">
+            إلغاء
+          </button>
+          <button
+            disabled={!form.name.trim()}
+            onClick={() => onSave(form.name.trim(), form.image)}
+            className="btn-primary rounded-xl px-6 py-2.5 text-sm font-black disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:scale-100">
+            حفظ التعديلات
           </button>
         </div>
       </div>
